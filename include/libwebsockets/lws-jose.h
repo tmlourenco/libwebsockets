@@ -62,6 +62,7 @@ enum lws_jose_algtype {
 	LWS_JOSE_ENCTYPE_RSASSA_PKCS1_PSS,
 
 	LWS_JOSE_ENCTYPE_ECDSA,
+	LWS_JOSE_ENCTYPE_ECDHES,
 
 	LWS_JOSE_ENCTYPE_AES_CBC,
 	LWS_JOSE_ENCTYPE_AES_CFB128,
@@ -80,6 +81,8 @@ struct lws_jose_jwe_alg {
 	enum lws_jose_algtype algtype_crypto; /* the encryption cipher */
 	const char *alg; /* the JWA enc alg name, eg "ES512" */
 	const char *curve_name; /* NULL, or, eg, "P-256" */
+	unsigned short keybits_min, keybits_fixed;
+	unsigned short ivbits;
 };
 
 LWS_VISIBLE LWS_EXTERN int

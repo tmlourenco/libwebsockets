@@ -83,8 +83,8 @@ lws_jws_confirm_sig(const char *in, size_t len, struct lws_jwk *jwk,
 {
 	int sig_pos = lws_jws_find_sig(in, len), pos = 0, n, m, h_len;
 	enum enum_genrsa_mode padding = LGRSAM_PKCS1_1_5;
-	uint8_t digest[LWS_GENHASH_LARGEST];
 	const struct lws_jose_jwe_alg *args = NULL;
+	uint8_t digest[LWS_GENHASH_LARGEST];
 	struct lws_genhash_ctx hash_ctx;
 	struct lws_genec_ctx ecdsactx;
 	struct lws_genrsa_ctx rsactx;
@@ -270,11 +270,7 @@ lws_jws_confirm_sig(const char *in, size_t len, struct lws_jwk *jwk,
 }
 
 LWS_VISIBLE int
-lws_jws_sign_from_b64(const char *b64_hdr, size_t hdr_len, const char *b64_pay,
-		      size_t pay_len, char *b64_sig, size_t sig_len,
-		      const struct lws_jose_jwe_alg *args,
-		      struct lws_jwk *jwk,
-		      struct lws_context *context)
+lws_jws_sign_from_b64(struct lws_jws *jws)
 {
 	enum enum_genrsa_mode padding = LGRSAM_PKCS1_1_5;
 	uint8_t digest[LWS_GENHASH_LARGEST];
@@ -284,43 +280,50 @@ lws_jws_sign_from_b64(const char *b64_hdr, size_t hdr_len, const char *b64_pay,
 	int n, m;
 	uint8_t *buf;
 
-	if (lws_genhash_init(&hash_ctx, args->hash_type))
+	if (jws->args->hash_type == LWS_GENHASH_TYPE_UNKNOWN &&
+	    jws->args->hmac_type == LWS_GENHMAC_TYPE_UNKNOWN &&
+	    !strcmp(jws->args->alg, "none"))
+		return 0;
+
+	if (lws_genhash_init(&hash_ctx, jws->args->hash_type))
 		return -1;
 
-	if (b64_hdr) {
-		if (lws_genhash_update(&hash_ctx, (uint8_t *)b64_hdr, hdr_len))
+	if (jws->b64_hdr) {
+		if (lws_genhash_update(&hash_ctx,
+				       (uint8_t *)jws->b64_hdr, jws->hdr_len))
 			goto hash_fail;
 		if (lws_genhash_update(&hash_ctx, (uint8_t *)".", 1))
 			goto hash_fail;
 	}
-	if (lws_genhash_update(&hash_ctx, (uint8_t *)b64_pay, pay_len))
+	if (lws_genhash_update(&hash_ctx, (uint8_t *)jws->b64_pay, jws->pay_len))
 		goto hash_fail;
 
 	if (lws_genhash_destroy(&hash_ctx, digest))
 		return -1;
 
-	switch (args->algtype_signing) {
+	switch (jws->args->algtype_signing) {
 	case LWS_JOSE_ENCTYPE_RSASSA_PKCS1_PSS:
 	case LWS_JOSE_ENCTYPE_RSASSA_PKCS1_OAEP:
 		padding = LGRSAM_PKCS1_OAEP_PSS;
 		/* fallthru */
 	case LWS_JOSE_ENCTYPE_RSASSA_PKCS1_1_5:
 
-		if (jwk->kty != LWS_GENCRYPTO_KYT_RSA)
+		if (jws->jwk->kty != LWS_GENCRYPTO_KYT_RSA)
 			return -1;
 
-		if (lws_genrsa_create(&rsactx, jwk->e, context, padding)) {
+		if (lws_genrsa_create(&rsactx, jws->jwk->e, jws->context, padding)) {
 			lwsl_notice("%s: lws_genrsa_public_decrypt_create\n",
 				    __func__);
 			return -1;
 		}
 
-		n = jwk->e[LWS_GENCRYPTO_RSA_KEYEL_N].len;
+		n = jws->jwk->e[LWS_GENCRYPTO_RSA_KEYEL_N].len;
 		buf = lws_malloc(n, "jws sign");
 		if (!buf)
 			return -1;
 
-		n = lws_genrsa_hash_sign(&rsactx, digest, args->hash_type, buf, n);
+		n = lws_genrsa_hash_sign(&rsactx, digest, jws->args->hash_type,
+					 buf, n);
 		lws_genrsa_destroy(&rsactx);
 		if (n < 0) {
 			lws_free(buf);
@@ -328,63 +331,65 @@ lws_jws_sign_from_b64(const char *b64_hdr, size_t hdr_len, const char *b64_pay,
 			return -1;
 		}
 
-		n = lws_jws_base64_enc((char *)buf, n, b64_sig, sig_len);
+		n = lws_jws_base64_enc((char *)buf, n, jws->b64_sig,
+					jws->sig_len);
 		lws_free(buf);
 
 		return n;
 
 	case LWS_JOSE_ENCTYPE_NONE:
 		return lws_jws_base64_enc((char *)digest,
-					  lws_genhash_size(args->hash_type),
-					  b64_sig, sig_len);
+					  lws_genhash_size(jws->args->hash_type),
+					  jws->b64_sig, jws->sig_len);
 	case LWS_JOSE_ENCTYPE_ECDSA:
 		/* ECDSA using SHA-256/384/512 */
 
 		/* the key coming in with this makes sense, right? */
 
 		/* has to be an EC key :-) */
-		if (jwk->kty != LWS_GENCRYPTO_KYT_EC)
+		if (jws->jwk->kty != LWS_GENCRYPTO_KYT_EC)
 			return -1;
 
 		/* key must state its curve */
-		if (!jwk->e[LWS_GENCRYPTO_EC_KEYEL_CRV].buf)
+		if (!jws->jwk->e[LWS_GENCRYPTO_EC_KEYEL_CRV].buf)
 			return -1;
 
 		/* must have all his pieces for a private key */
-		if (!jwk->e[LWS_GENCRYPTO_EC_KEYEL_X].buf ||
-		    !jwk->e[LWS_GENCRYPTO_EC_KEYEL_Y].buf ||
-		    !jwk->e[LWS_GENCRYPTO_EC_KEYEL_D].buf)
+		if (!jws->jwk->e[LWS_GENCRYPTO_EC_KEYEL_X].buf ||
+		    !jws->jwk->e[LWS_GENCRYPTO_EC_KEYEL_Y].buf ||
+		    !jws->jwk->e[LWS_GENCRYPTO_EC_KEYEL_D].buf)
 			return -1;
 
 		/* key must match the selected alg curve */
-		if (strcmp((const char *)jwk->e[LWS_GENCRYPTO_EC_KEYEL_CRV].buf,
-			   args->curve_name))
+		if (strcmp((const char *)
+				jws->jwk->e[LWS_GENCRYPTO_EC_KEYEL_CRV].buf,
+			    jws->args->curve_name))
 			return -1;
 
-		if (lws_genecdsa_create(&ecdsactx, context, NULL)) {
+		if (lws_genecdsa_create(&ecdsactx, jws->context, NULL)) {
 			lwsl_notice("%s: lws_genrsa_public_decrypt_create\n",
 				    __func__);
 			return -1;
 		}
 
-		if (lws_genecdsa_set_key(&ecdsactx, jwk->e)) {
+		if (lws_genecdsa_set_key(&ecdsactx, jws->jwk->e)) {
 			lws_genec_destroy(&ecdsactx);
 			lwsl_notice("%s: ec key import fail\n", __func__);
 			return -1;
 		}
-		m = jwk->e[LWS_GENCRYPTO_EC_KEYEL_D].len;
+		m = jws->jwk->e[LWS_GENCRYPTO_EC_KEYEL_D].len;
 		buf = lws_malloc(m, "jws sign");
 		if (!buf)
 			return -1;
 
-		n = lws_genecdsa_hash_sign(&ecdsactx, digest, args->hash_type,
+		n = lws_genecdsa_hash_sign(&ecdsactx, digest, jws->args->hash_type,
 					   (uint8_t *)buf, m);
 		lws_genec_destroy(&ecdsactx);
 		if (n < 0) {
 			lwsl_notice("decrypt fail\n");
 			return -1;
 		}
-		n = lws_jws_base64_enc((char *)buf, m, b64_sig, sig_len);
+		n = lws_jws_base64_enc((char *)buf, m, jws->b64_sig, jws->sig_len);
 		lws_free(buf);
 
 		return n;
@@ -401,3 +406,33 @@ hash_fail:
 	lws_genhash_destroy(&hash_ctx, NULL);
 	return -1;
 }
+
+/*
+ * Flattened JWS JSON:
+ *
+ *  {
+ *    "payload":   "<payload contents>",
+ *    "protected": "<integrity-protected header contents>",
+ *    "header":    <non-integrity-protected header contents>,
+ *    "signature": "<signature contents>"
+ *   }
+ */
+
+LWS_VISIBLE int
+lws_jws_write_flattened_json(struct lws_jws *jws, char *flattened, size_t len)
+{
+#if 0
+	int n = 0;
+
+	n += lws_snprintf(flattened + n, len - n , "{\"payload\": \"%s\",",
+			  jws->b64_pay);
+
+	n += lws_snprintf(flattened + n, len - n , "{\"protected\": \"%s\",",
+			  jws->);
+
+#endif
+	return 0;
+}
+
+
+

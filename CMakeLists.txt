@@ -292,6 +292,12 @@ if (LWS_WITH_LWSWS)
  set(LWS_ROLE_RAW_PROXY 1)
 endif()
 
+# sshd plugin
+if (LWS_WITH_PLUGINS)
+ set(LWS_WITH_GENHASH 1)
+ set(LWS_WITH_GENAES 1)
+endif()
+
 if (LWS_ROLE_RAW_PROXY)
  set (LWS_WITHOUT_CLIENT 0)
  set (LWS_WITHOUT_SERVER 0)

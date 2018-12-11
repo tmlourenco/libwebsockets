@@ -127,7 +127,7 @@ lws_jws_jose_cb(struct lejp_ctx *ctx, char reason)
 
 	/* past here, JWE only */
 
-	case LJJHI_ENC:	/* JWE only: Optional: string */
+	case LJJHI_ENC:	/* JWE only: Mandatory: string */
 		if (!args->is_jwe)
 			return -1;
 		if (lws_gencrypto_jwe_enc_to_definition(ctx->buf,

@@ -121,11 +121,13 @@ static const char
 int
 test_jws(struct lws_context *context)
 {
-	char buf[2048], *p = buf, *end = buf + sizeof(buf) - 1, *enc_ptr, *p1;
+	char buf[2048], flattened[1024], *p = buf, *end = buf + sizeof(buf) - 1,
+	     *enc_ptr, *p1;
 	const struct lws_jose_jwe_alg *jose_alg;
 	uint8_t digest[LWS_GENHASH_LARGEST];
 	struct lws_genhmac_ctx ctx;
 	struct lws_jwk jwk;
+	struct lws_jws jws;
 	int n;
 
 	/* Test 1: SHA256 on RFC7515 worked example */
@@ -223,15 +225,28 @@ test_jws(struct lws_context *context)
 		goto bail;
 	}
 
-	n = lws_jws_sign_from_b64(buf, p - buf, p + 1, p1 - (p + 1),
-				  p1 + 1, sizeof(buf) - (p1 - buf) - 1,
-				  jose_alg, &jwk, context);
+	jws.args = jose_alg;
+	jws.jwk = &jwk;
+	jws.context = context;
+	jws.b64_hdr = buf;
+	jws.b64_pay = p + 1;
+	jws.b64_sig = p1 + 1;
+	jws.hdr_len = p - buf;
+	jws.pay_len = p1 - (p + 1);
+	jws.sig_len = sizeof(buf) - (p1 - buf) - 1;
+
+	n = lws_jws_sign_from_b64(&jws);
 	if (n < 0) {
 		lwsl_err("%s: failed signing test packet\n", __func__);
 		goto bail;
 	}
 
-	// puts(buf);
+	if (lws_jws_write_flattened_json(&jws, flattened, sizeof(flattened))) {
+		lwsl_notice("%s: failed to write flattened jws\n", __func__);
+		goto bail;
+	}
+
+	puts(flattened);
 
 	/* 2.4: confirm our signature can be verified */
 

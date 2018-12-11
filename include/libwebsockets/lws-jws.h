@@ -33,6 +33,21 @@
  */
 ///@{
 
+struct lws_jws {
+	const struct lws_jose_jwe_alg *args; /* algorithm info used for sig */
+	struct lws_jwk *jwk; /* the struct lws_jwk containing the signing key */
+	struct lws_context *context; /* the lws context (used to get random) */
+
+	const char *b64_hdr; /* protected header encoded in b64, may be NULL */
+	const char *b64_pay; /* payload encoded in b64 */
+	char *b64_sig; /* buffer to write the b64 encoded signature into */
+	const char *b64_unprot_hdr; /* unprotected header in b64, may be NULL */
+	size_t hdr_len; /* bytes in b64 coding of protected header */
+	size_t pay_len; /* bytes in b64 coding of payload */
+	size_t sig_len; /* max bytes we can write at b64_sig */
+	size_t b64_unprot_hdr_len; /* bytes in unprotected JSON hdr */
+};
+
 LWS_VISIBLE LWS_EXTERN int
 lws_jws_confirm_sig(const char *in, size_t len, struct lws_jwk *jwk,
 		    struct lws_context *context);
@@ -40,15 +55,7 @@ lws_jws_confirm_sig(const char *in, size_t len, struct lws_jwk *jwk,
 /**
  * lws_jws_sign_from_b64() - add b64 sig to b64 hdr + payload
  *
- * \param b64_hdr: protected header encoded in b64, may be NULL
- * \param hdr_len: bytes in b64 coding of protected header
- * \param b64_pay: payload encoded in b64
- * \param pay_len: bytes in b64 coding of payload
- * \param b64_sig: buffer to write the b64 encoded signature into
- * \param sig_len: max bytes we can write at b64_sig
- * \param hash_type: one of LWS_GENHASH_TYPE_SHA[256|384|512]
- * \param jwk: the struct lws_jwk containing the signing key
- * \param context: the lws context (used to get random)
+ * \param jws: information to include in the signature
  *
  * This adds a b64-coded JWS signature of the b64-encoded protected header
  * and b64-encoded payload, at \p b64_sig.  The signature will be as large
@@ -62,11 +69,19 @@ lws_jws_confirm_sig(const char *in, size_t len, struct lws_jwk *jwk,
  * Returns the length of the encoded signature written to \p b64_sig, or -1.
  */
 LWS_VISIBLE LWS_EXTERN int
-lws_jws_sign_from_b64(const char *b64_hdr, size_t hdr_len, const char *b64_pay,
-		      size_t pay_len, char *b64_sig, size_t sig_len,
-		      const struct lws_jose_jwe_alg *args,
-		      struct lws_jwk *jwk,
-		      struct lws_context *context);
+lws_jws_sign_from_b64(struct lws_jws *jws);
+
+/**
+ * lws_jws_write_flattened_json() - create flattened JSON sig
+ *
+ * \param jws: information to include in the signature
+ * \param flattened: output buffer for JSON
+ * \param len: size of \p flattened output buffer
+ *
+ */
+
+LWS_VISIBLE int
+lws_jws_write_flattened_json(struct lws_jws *jws, char *flattened, size_t len);
 
 /**
  * lws_jws_base64_enc() - encode input data into b64url data
